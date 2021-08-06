@@ -7,6 +7,8 @@ namespace TmpClient
 {
     class Program
     {
+        public static AuthValue _authValue = new AuthValue(new byte[] { 22, 123, 22, 1, 33 });
+
         static Tpm2Device _tpmDevice;
 
         static bool useSimulator = true;
@@ -26,13 +28,87 @@ namespace TmpClient
         {
             Console.WriteLine("Hello World!");
 
+            using (var client = TpmClient.CreateSimulatorClient())
+            {
+                var helloWorld = Encoding.UTF8.GetBytes("Hello World");
+
+                var cipher = RsaExamples.RsaEncrypt(client.Tpm, helloWorld);
+                var decipher = RsaExamples.RsaDecrypt(client.Tpm, cipher);
+
+                var helloWorld2 = Encoding.UTF8.GetString(decipher);
+
+                return;
+
+
+
+
+
+
+
+
+                Examples.PrintCommandss(client.Tpm);
+                Examples.CreateTwoPrimaries(client.Tpm);
+
+                Examples.EncryptDecrypt(client.Tpm);
+
+                return;
+
+
+
+
+                var r = client.Tpm.GetRandom(10);
+                Console.WriteLine(client.Tpm._GetUnderlyingDevice().HasRM());
+                CreateRsaPrimaryKey(client.Tpm, false);
+                Examples.NVReadWrite(client.Tpm);
+                Examples.NVCounter(client.Tpm);
+
+                Examples.AvailablePCRBanks(client.Tpm);
+                Examples.PrintAlgorithms(client.Tpm);
+            }
+
+            return;
+
+            using (var client = TpmClient.CreateDeviceClient())
+            {
+                Examples.AvailablePCRBanks(client.Tpm);
+                Examples.PrintAlgorithms(client.Tpm);
+                Examples.PrintCommandss(client.Tpm);
+            }
+
+            return;
+
+
+
+
+
+
+
+
+            Sign();
+
+            return;
+
+            var data = Encoding.UTF8.GetBytes("Hello World");
+            Examples.SaveValueIntoTpm(3001, data, data.Length, _authValue);
+            Examples.ReadValueFromTpm(3001, data.Length, _authValue);
+            return;
+
+
+
+            Examples.GetHardwareDeviceName();
+            return;
+            Examples.GetDeviceId();
+
+
+            return;
+
             Examples.ConnectLocal();
             Examples.ConnectSimulator();
 
 
             using (var device = Examples.Connect(useSimulator))
             {
-                Examples.AvailablePCRBanks(device);
+                //Examples.AvailablePCRBanks(device);
             }
 
 
@@ -207,14 +283,79 @@ namespace TmpClient
             }
         }
 
+        static TpmHandle CreateRsaPrimaryKey(Tpm2 tpm, bool isSimulator)
+        {
+            if (isSimulator)
+            {
+                tpm.DictionaryAttackParameters(TpmHandle.RhLockout, 1000, 10, 1);
+                tpm.DictionaryAttackLockReset(TpmHandle.RhLockout);
+            }
+
+            //
+            // First member of SensitiveCreate contains auth value of the key
+            //
+            var sensCreate = new SensitiveCreate(new byte[] { 0xa, 0xb, 0xc }, null);
+
+            TpmPublic parms = new TpmPublic(
+                TpmAlgId.Sha1,
+                ObjectAttr.Restricted | ObjectAttr.Decrypt | ObjectAttr.FixedParent | ObjectAttr.FixedTPM
+                    | ObjectAttr.UserWithAuth | ObjectAttr.SensitiveDataOrigin,
+                null,
+                new RsaParms(
+                    new SymDefObject(TpmAlgId.Aes, 128, TpmAlgId.Cfb),
+                    new NullAsymScheme(),
+                    2048,
+                    0),
+                new Tpm2bPublicKeyRsa());
+
+            byte[] outsideInfo = Globs.GetRandomBytes(8);
+            var creationPcr = new PcrSelection(TpmAlgId.Sha1, new uint[] { 0, 1, 2 });
+
+            TpmPublic pubCreated;
+            CreationData creationData;
+            TkCreation creationTicket;
+            byte[] creationHash;
+
+            Console.WriteLine("Automatic authorization of TpmRh.Owner.");
+
+            //
+            // An auth session is added automatically to authorize access to the permanent
+            // handle TpmHandle.RhOwner.
+            //
+            // Note that if the TPM is not a simulator and not cleared, you need to
+            // assign the corresponding auth value to the tpm.OwnerAuth property of
+            // the given Tpm2 object.
+            //
+            TpmHandle h = tpm.CreatePrimary(TpmRh.Owner,
+                                            sensCreate,
+                                            parms,
+                                            outsideInfo,
+                                            new PcrSelection[] { creationPcr },
+                                            out pubCreated,
+                                            out creationData,
+                                            out creationHash,
+                                            out creationTicket);
+
+            Console.WriteLine("Primary RSA storage key created.");
+
+            return h;
+        }
+
         static void Sign()
         {
-            using (Tpm2Device tpmDevice = new TbsDevice())
+            using (Tpm2Device tpmDevice = Examples.GetSimulator())
             {
                 tpmDevice.Connect();
 
                 using (var tpm = new Tpm2(tpmDevice))
                 {
+                    if (tpmDevice is TcpTpmDevice)
+                        tpmDevice.PowerCycle();
+
+
+
+                    CreateRsaPrimaryKey(tpm, tpmDevice is TcpTpmDevice);
+
                     var keyTemplate = new TpmPublic(TpmAlgId.Sha1,                                  // Name algorithm
                                  ObjectAttr.UserWithAuth | ObjectAttr.Sign |     // Signing key
                                  ObjectAttr.FixedParent | ObjectAttr.FixedTPM | // Non-migratable 
